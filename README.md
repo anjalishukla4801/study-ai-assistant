@@ -4,7 +4,7 @@
 
 Study AI Assistant is a Streamlit-based web application that uses **Llama-3 (via Groq)** to turn static PDF documents into active learning tools. Upload your course notes, and instantly get a chatbot, quizzes, and flashcards generated from your content.
 
-🔗 **Live Demo:** [Click here to view the App](https://study-ai-assistant.streamlit.app) *(Replace with your actual link)*
+🔗 **Live Demo:** [Click here to view the App](https://study-ai-assistant.streamlit.app/) *(Replace with your actual link)*
 
 ---
 
