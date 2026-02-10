@@ -1,87 +1,142 @@
 import streamlit as st
-import google.generativeai as genai
+from groq import Groq
+import os
 import json
 
-st.set_page_config(page_title="Quiz Master", page_icon="❓")
+st.set_page_config(page_title="Quiz Master", page_icon="❓", layout="wide")
 
-# --- 1. SAFETY CHECKS ---
+# --- CUSTOM CSS ---
+st.markdown("""
+    <style>
+    .question-card {
+        background-color: #262730;
+        padding: 20px;
+        border-radius: 15px;
+        border: 1px solid #4B4B4B;
+        margin-bottom: 20px;
+    }
+    .question-text {
+        font-size: 18px;
+        font-weight: bold;
+        color: #FAFAFA;
+        margin-bottom: 10px;
+    }
+    .success-box {
+        padding: 10px;
+        background-color: rgba(0, 255, 0, 0.1);
+        border-left: 5px solid #00FF00;
+        border-radius: 5px;
+    }
+    .error-box {
+        padding: 10px;
+        background-color: rgba(255, 0, 0, 0.1);
+        border-left: 5px solid #FF0000;
+        border-radius: 5px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- 1. SETUP GROQ CLIENT ---
+try:
+    api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
+    client = Groq(api_key=api_key)
+except Exception as e:
+    st.error(f"⚠️ API Key Error: {e}")
+    st.stop()
+
 if "pdf_text" not in st.session_state:
     st.warning("🚨 No notes found! Please upload a PDF on the Home page first.")
     st.stop()
 
-try:
-    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-except:
-    st.error("API Key Error. Please check your secrets.toml file.")
-    st.stop()
-
 st.title("❓ Quiz Master")
-st.markdown("Test your knowledge before the exams.")
+st.markdown("### *Customize your practice session.*")
 
-# --- 2. GENERATE QUIZ BUTTON ---
-if st.button("🚀 Generate New Quiz"):
-    with st.spinner("Analyzing notes and creating questions..."):
+# --- 2. QUIZ SETTINGS ---
+with st.expander("⚙️ Quiz Settings", expanded=True):
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        num_questions = st.slider("Number of Questions", min_value=3, max_value=10, value=5)
+    
+    with col2:
+        difficulty = st.selectbox("Difficulty Level", ["Easy", "Medium", "Hard"])
         
-        # PROMPT DESIGN
-        # We limit text to 15,000 characters to prevent "Rate Limit" crashes
-        truncated_text = st.session_state.pdf_text[:15000]
-        
-        prompt = """
-        Create 5 multiple choice questions based on the text provided.
-        Format the output strictly as a JSON array of objects.
-        
-        Example Format:
-        [
-            {
-                "q": "What is the capital of France?",
-                "options": ["London", "Berlin", "Paris", "Madrid"],
-                "answer": "C",
-                "explanation": "Paris is the capital of France."
-            }
-        ]
-        """
-        
+    with col3:
+        quiz_type = st.selectbox("Question Type", ["Multiple Choice", "True/False"])
+
+# --- 3. GENERATE QUIZ ---
+if st.button("🚀 Generate Quiz", use_container_width=True):
+    with st.spinner("🧠 Analyzing notes and crafting questions..."):
         try:
-            # Call Gemini
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(f"Context: {truncated_text}\n\n{prompt}")
+            # SAFETY TRUNCATION
+            safe_text = st.session_state.pdf_text[:15000] 
             
-            # Clean up the response (remove markdown backticks if Gemini adds them)
-            clean_text = response.text.replace("```json", "").replace("```", "").strip()
+            # Dynamic Prompt Construction
+            type_instruction = ""
+            if quiz_type == "True/False":
+                type_instruction = "The 'options' array must ONLY contain ['True', 'False']."
+            else:
+                type_instruction = "The 'options' array must contain 4 distinct choices."
+
+            prompt = f"""
+            Create {num_questions} {difficulty} questions based on this text:
+            {safe_text}
             
-            # Save to Session State
-            st.session_state.quiz_data = json.loads(clean_text)
+            Question Type: {quiz_type}
+            
+            Return a JSON Array ONLY. No markdown. Format:
+            [
+                {{"q": "Question?", "options": ["Option1", "Option2"], "answer": "Option1", "explanation": "Why..."}}
+            ]
+            
+            Constraint: {type_instruction}
+            """
+            
+            completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile", 
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.5,
+                stop=None
+            )
+            
+            raw_json = completion.choices[0].message.content
+            clean_json = raw_json.replace("```json", "").replace("```", "").strip()
+            
+            st.session_state.quiz_data = json.loads(clean_json)
             st.session_state.quiz_generated = True
             st.rerun()
-            
-        except Exception as e:
-            st.error(f"Error generating quiz: {e}")
 
-# --- 3. DISPLAY QUIZ (With The Logic Fix) ---
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+# --- 4. DISPLAY QUIZ ---
 if "quiz_generated" in st.session_state:
+    score = 0
+    total = len(st.session_state.quiz_data)
     
-    # Loop through each question
     for i, q in enumerate(st.session_state.quiz_data):
-        st.subheader(f"Q{i+1}: {q['q']}")
+        st.markdown(f"""
+        <div class="question-card">
+            <div class="question-text">Q{i+1}: {q['q']}</div>
+        </div>
+        """, unsafe_allow_html=True)
         
-        # Display Options
-        # The 'choice' variable will hold the text user clicked (e.g., "Paris")
-        choice = st.radio("Select an answer:", q["options"], key=f"q_{i}", index=None)
+        choice = st.radio(f"Select answer for Q{i+1}:", q["options"], key=f"q_{i}", index=None, label_visibility="collapsed")
         
-        # CHECK ANSWER LOGIC
         if choice:
-            # 1. Find the index of the user's choice (0, 1, 2, or 3)
-            user_index = q["options"].index(choice)
-            
-            # 2. Convert index to Letter (0->A, 1->B, 2->C, 3->D)
-            letter_map = ['A', 'B', 'C', 'D']
-            user_letter = letter_map[user_index]
-            
-            # 3. Compare user_letter with the correct answer key
-            if user_letter == q['answer']:
-                st.success("✅ Correct!")
+            # Flexible checking: "Option A" OR just "True" matches
+            if choice == q['answer'] or choice.startswith(q['answer']):
+                st.markdown('<div class="success-box">✅ <b>Correct!</b></div>', unsafe_allow_html=True)
+                score += 1
             else:
-                st.error(f"❌ Incorrect. The correct answer was **Option {q['answer']}**.")
-                st.info(f"💡 **Explanation:** {q['explanation']}")
-        
+                st.markdown(f'<div class="error-box">❌ <b>Incorrect.</b><br>Answer: {q["answer"]}</div>', unsafe_allow_html=True)
+                with st.expander("💡 View Explanation"):
+                    st.info(q['explanation'])
         st.divider()
+
+    if st.button("🏁 Check Final Score"):
+        if score == total:
+            st.success(f"🎉 Perfect Score! {score}/{total}")
+            st.balloons()
+        else:
+            st.info(f"You got {score}/{total} correct.")

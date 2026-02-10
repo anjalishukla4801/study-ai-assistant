@@ -1,46 +1,61 @@
 import streamlit as st
-import google.generativeai as genai
+from groq import Groq
 import os
 
-st.set_page_config(page_title="ChatBot", page_icon="💬")
+st.set_page_config(page_title="ChatBot", page_icon="🤖")
 
-if "pdf_text" not in st.session_state or st.session_state.pdf_text == "":
-    st.warning("🚨 No notes found! Please go to the 'Home' page and upload a PDF first.")
-    st.stop()
-
-# --- STABLE SETUP (Use this exactly) ---
+# --- 1. SETUP GROQ ---
 try:
-    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+    api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
+    client = Groq(api_key=api_key)
 except Exception as e:
-    st.error(f"🚨 API Key Error: {e}")
+    st.error("🚨 Groq API Key is missing! Check your secrets.")
     st.stop()
 
-st.title("💬 Chat with Gemini")
+if "pdf_text" not in st.session_state:
+    st.warning("🚨 No notes found! Please upload a PDF on the Home page first.")
+    st.stop()
 
+st.title("🤖 Chat with Llama-3")
+
+# --- 2. CHAT HISTORY ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).markdown(msg["content"])
 
-if prompt := st.chat_input("Ask a question..."):
+# --- 3. HANDLE USER INPUT ---
+if prompt := st.chat_input("Ask a question about your notes..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
-                # We use 'gemini-pro' because it is 100% stable
-                model = genai.GenerativeModel('gemini-pro')
+                # SAFETY: Limit context to avoid crashing Groq (approx 15k chars)
+                context_text = st.session_state.pdf_text[:15000]
                 
-                full_prompt = f"""
-                Context: {st.session_state.pdf_text}
+                # Create the conversation for the API
+                chat_history = [
+                    {"role": "system", "content": f"You are a helpful study assistant. Answer based on this text:\n\n{context_text}"}
+                ]
+                # Add previous chat history (last 4 messages to save space)
+                chat_history.extend(st.session_state.messages[-4:])
                 
-                Question: {prompt}
-                """
+                # Call Groq
+                completion = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=chat_history,
+                    temperature=0.5,
+                    max_tokens=500
+                )
                 
-                response = model.generate_content(full_prompt)
-                st.markdown(response.text)
-                st.session_state.messages.append({"role": "assistant", "content": response.text})
+                response = completion.choices[0].message.content
+                st.markdown(response)
+                
+                # Save response
+                st.session_state.messages.append({"role": "assistant", "content": response})
+                
             except Exception as e:
                 st.error(f"Error: {e}")

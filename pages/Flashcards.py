@@ -1,41 +1,57 @@
 import streamlit as st
-import google.generativeai as genai
-import pandas as pd
+from groq import Groq
 import json
+import pandas as pd
+import os
 
 st.set_page_config(page_title="Flashcards", page_icon="⚡")
 
-if "pdf_text" not in st.session_state or st.session_state.pdf_text == "":
-    st.warning("🚨 Upload notes first!")
+# --- 1. SETUP GROQ ---
+try:
+    api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
+    client = Groq(api_key=api_key)
+except:
+    st.error("🚨 Groq API Key Missing")
     st.stop()
 
-try:
-    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-except:
-    st.error("API Key Missing")
+if "pdf_text" not in st.session_state:
+    st.warning("🚨 Upload notes first!")
     st.stop()
 
 st.title("⚡ Smart Flashcards")
 
-if st.button("Generate Deck"):
-    with st.spinner("Generating..."):
-        # We ask for raw text and parse it manually to be safe
-        prompt = """
-        Extract 5 terms and definitions.
-        Format strictly as JSON: [{"term": "Concept", "def": "Definition"}]
-        """
+# --- 2. GENERATE BUTTON ---
+if st.button("🚀 Generate Flashcards"):
+    with st.spinner("Analyzing text..."):
         try:
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(f"Context: {st.session_state.pdf_text}\n\n{prompt}")
+            # SAFETY LIMIT
+            safe_text = st.session_state.pdf_text[:15000]
             
-            # clean up response (sometimes Gemini adds ```json markdown)
-            clean_text = response.text.replace("```json", "").replace("```", "")
+            prompt = f"""
+            Extract 5 key terms and definitions from this text:
+            {safe_text}
             
-            data = json.loads(clean_text)
+            Return a JSON Array ONLY. Format:
+            [
+                {{"term": "Concept", "def": "Definition"}}
+            ]
+            """
+            
+            completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.5
+            )
+            
+            # Clean and Parse JSON
+            raw_json = completion.choices[0].message.content
+            clean_json = raw_json.replace("```json", "").replace("```", "").strip()
+            data = json.loads(clean_json)
+            
+            # Display as a nice Table
+            st.write("### 📝 Key Terms")
             df = pd.DataFrame(data)
-            st.data_editor(df, use_container_width=True)
+            st.table(df)
             
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 CSV", csv, "cards.csv", "text/csv")
         except Exception as e:
             st.error(f"Error: {e}")
