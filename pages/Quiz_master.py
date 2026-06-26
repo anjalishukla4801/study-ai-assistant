@@ -15,15 +15,23 @@ current_theme = styles.display_theme_toggle()
 styles.apply_custom_styles(current_theme)
 
 
-# --- 1. SETUP GROQ CLIENT ---
+# --- 1. SETUP GROQ CLIENT AND RAG ---
 try:
     api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
     client = Groq(api_key=api_key)
+    
+    from rag.embeddings import RAGEmbeddings
+    from rag.vector_store import RAGVectorStore
+    from rag.retriever import RAGRetriever
+    
+    embeddings_model = RAGEmbeddings()
+    vector_store = RAGVectorStore(persist_directory="vector_db")
+    retriever = RAGRetriever(embeddings=embeddings_model, vector_store=vector_store)
 except Exception as e:
     st.error(f"⚠️ API Key Error: {e}")
     st.stop()
 
-if "pdf_text" not in st.session_state:
+if "pdf_hash" not in st.session_state:
     st.warning("🚨 No notes found! Please upload a PDF on the Home page first.")
     st.stop()
 
@@ -47,8 +55,9 @@ with st.expander("Quiz Settings", expanded=True):
 if st.button("Generate Quiz", use_container_width=True):
     with st.spinner("Analyzing notes and crafting questions..."):
         try:
-            # SAFETY TRUNCATION
-            safe_text = st.session_state.pdf_text[:15000] 
+            # Use RAG to sample 8 diverse chunks across the entire document
+            diverse_chunks = retriever.get_diverse_chunks(st.session_state.pdf_hash, num_chunks=8)
+            safe_text = "\n\n".join([c["text"] for c in diverse_chunks]) 
             
             # Dynamic Prompt Construction
             type_instruction = ""

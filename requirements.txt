@@ -2,3 +2,6 @@ streamlit
 groq
 PyPDF2
 pandas
+chromadb
+sentence-transformers
+langchain

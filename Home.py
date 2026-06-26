@@ -1,5 +1,12 @@
 import streamlit as st
 import PyPDF2
+import hashlib
+
+# Import RAG components
+from rag.pdf_loader import PDFLoader
+from rag.chunker import RAGChunker
+from rag.embeddings import RAGEmbeddings
+from rag.vector_store import RAGVectorStore
 
 st.set_page_config(page_title="Study AI", page_icon=None, layout="wide")
 
@@ -31,19 +38,45 @@ with st.container():
     uploaded_file = st.file_uploader("Upload your PDF document to get started", type=["pdf"], label_visibility="collapsed")
 
 if uploaded_file is not None:
-    # --- 2. EXTRACT TEXT ---
+    # --- 2. EXTRACT TEXT & RAG INDEXING ---
     with st.spinner("Processing document..."):
         try:
+            # A. Compute file hash
+            file_bytes = uploaded_file.getvalue()
+            pdf_hash = hashlib.sha256(file_bytes).hexdigest()
+            st.session_state.pdf_hash = pdf_hash
+            
+            # B. Extract full raw text for legacy Flashcards/Quizzes (so they are unaffected)
             pdf_reader = PyPDF2.PdfReader(uploaded_file)
             text = ""
             for page in pdf_reader.pages:
-                text += page.extract_text()
-            
-            # Save to Session State (so other pages can use it)
+                text += page.extract_text() or ""
             st.session_state.pdf_text = text
             
-            # --- 3. SUCCESS UI ---
-            st.success(f"Document processed. {len(pdf_reader.pages)} pages loaded.")
+            # C. Check ChromaDB collection and index if new
+            vector_store = RAGVectorStore(persist_directory="vector_db")
+            
+            if vector_store.collection_exists_and_populated(pdf_hash):
+                st.success(f"Document processed. (Loaded existing embeddings for {uploaded_file.name})")
+            else:
+                # Load page-by-page
+                pages = PDFLoader.load(uploaded_file)
+                
+                # Chunk
+                chunker = RAGChunker(chunk_size=700, chunk_overlap=150)
+                chunks = chunker.chunk_documents(pages)
+                
+                if not chunks:
+                    raise ValueError("Document yielded 0 chunks. Cannot embed empty content.")
+                
+                # Embed
+                embeddings_model = RAGEmbeddings()
+                chunk_texts = [item["text"] for item in chunks]
+                embeddings = embeddings_model.embed_documents(chunk_texts)
+                
+                # Add to Vector DB
+                vector_store.add_chunks(pdf_hash, chunks, embeddings)
+                st.success(f"Document processed. {len(pdf_reader.pages)} pages loaded, split into {len(chunks)} chunks, and saved to database.")
             
             # Action Cards
             st.divider()
@@ -60,7 +93,7 @@ if uploaded_file is not None:
                 st.caption("Test your knowledge.")
             
         except Exception as e:
-            st.error(f"Error reading PDF: {e}")
+            st.error(f"Error processing PDF: {e}")
 
 # --- 4. SIDEBAR INFO ---
 with st.sidebar:

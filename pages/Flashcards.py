@@ -16,15 +16,23 @@ import styles
 current_theme = styles.display_theme_toggle()
 styles.apply_custom_styles(current_theme)
 
-# --- 1. SETUP GROQ ---
+# --- 1. SETUP GROQ AND RAG ---
 try:
     api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
     client = Groq(api_key=api_key)
-except:
-    st.error("🚨 Groq API Key Missing")
+    
+    from rag.embeddings import RAGEmbeddings
+    from rag.vector_store import RAGVectorStore
+    from rag.retriever import RAGRetriever
+    
+    embeddings_model = RAGEmbeddings()
+    vector_store = RAGVectorStore(persist_directory="vector_db")
+    retriever = RAGRetriever(embeddings=embeddings_model, vector_store=vector_store)
+except Exception as e:
+    st.error(f"🚨 Setup Error: {e}")
     st.stop()
 
-if "pdf_text" not in st.session_state:
+if "pdf_hash" not in st.session_state:
     st.warning("🚨 Upload notes first!")
     st.stop()
 
@@ -35,8 +43,9 @@ st.markdown("Generate flashcards from your notes to help you memorize key concep
 if st.button("Generate Flashcards"):
     with st.spinner("Analyzing text..."):
         try:
-            # SAFETY LIMIT
-            safe_text = st.session_state.pdf_text[:15000]
+            # Use RAG to sample 8 diverse chunks across the entire document
+            diverse_chunks = retriever.get_diverse_chunks(st.session_state.pdf_hash, num_chunks=8)
+            safe_text = "\n\n".join([c["text"] for c in diverse_chunks])
             
             prompt = f"""
             Extract 10 key terms and definitions from this text:
@@ -61,11 +70,13 @@ if st.button("Generate Flashcards"):
             
             # Save to session state to persist
             st.session_state.flashcards = data
+            st.rerun()
             
         except Exception as e:
             st.error(f"Error: {e}")
 
 # --- 3. DISPLAY FLASHCARDS ---
+if "flashcards" in st.session_state:
     st.divider()
     st.subheader("Your Flashcards")
     

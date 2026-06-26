@@ -14,15 +14,25 @@ import styles
 current_theme = styles.display_theme_toggle()
 styles.apply_custom_styles(current_theme)
 
-# --- 1. SETUP GROQ ---
+# --- 1. SETUP RAG AND GROQ ---
 try:
     api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
-    client = Groq(api_key=api_key)
+    
+    # Import RAG components
+    from rag.embeddings import RAGEmbeddings
+    from rag.vector_store import RAGVectorStore
+    from rag.retriever import RAGRetriever
+    from rag.llm import GroqLLM
+    
+    embeddings_model = RAGEmbeddings()
+    vector_store = RAGVectorStore(persist_directory="vector_db")
+    retriever = RAGRetriever(embeddings=embeddings_model, vector_store=vector_store)
+    llm = GroqLLM(api_key=api_key)
 except Exception as e:
-    st.error("🚨 Groq API Key is missing! Check your secrets.")
+    st.error(f"🚨 Setup Error: {e}")
     st.stop()
 
-if "pdf_text" not in st.session_state:
+if "pdf_hash" not in st.session_state:
     st.warning("🚨 No notes found! Please upload a PDF on the Home page first.")
     st.stop()
 
@@ -47,25 +57,24 @@ if prompt := st.chat_input("Ask a question about your notes..."):
     with st.chat_message("assistant", avatar=None):
         with st.spinner("Thinking..."):
             try:
-                # SAFETY: Limit context to avoid crashing Groq (approx 15k chars)
-                context_text = st.session_state.pdf_text[:15000]
+                # 1. Retrieve top 5 relevant chunks from ChromaDB
+                pdf_hash = st.session_state.pdf_hash
+                retrieved_chunks = retriever.retrieve(pdf_hash, prompt, top_k=5)
                 
-                # Create the conversation for the API
-                chat_history = [
-                    {"role": "system", "content": f"You are a helpful study assistant. Answer based on this text:\n\n{context_text}"}
-                ]
-                # Add previous chat history (last 4 messages to save space)
-                chat_history.extend(st.session_state.messages[-4:])
+                # 2. Extract last 4 messages for conversational history
+                chat_history = []
+                # Exclude the message we just appended (the current prompt)
+                history_msgs = st.session_state.messages[:-1]
+                for msg in history_msgs[-4:]:
+                    chat_history.append({"role": msg["role"], "content": msg["content"]})
                 
-                # Call Groq
-                completion = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=chat_history,
-                    temperature=0.5,
-                    max_tokens=500
+                # 3. Call RAG LLM
+                response = llm.generate_answer(
+                    query=prompt,
+                    retrieved_chunks=retrieved_chunks,
+                    chat_history=chat_history
                 )
                 
-                response = completion.choices[0].message.content
                 st.markdown(response)
                 
                 # Save response
