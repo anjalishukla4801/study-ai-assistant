@@ -8,18 +8,18 @@ A professional, high-performance study companion powered by AI. Transform your s
 
 ## Overview
 
-Study AI Assistant automates the most time-consuming parts of learning. By leveraging advanced Large Language Models (LLMs), it converts standard PDF notes into a suite of powerful study tools including interactive chatbots, randomized flashcards, and customized knowledge tests.
+Study AI Assistant automates the most time-consuming parts of learning. By leveraging a state-of-the-art **Retrieval-Augmented Generation (RAG)** pipeline, it converts standard PDF notes into a suite of powerful study tools including interactive chatbots, randomized flashcards, and customized knowledge tests. The application chunks, embeds, and stores documents locally to retrieve highly relevant context, enabling accurate answers with automatic source citation.
 
 ## Core Features
 
-### 1. Intelligent Chatbot
-Engage in a context-aware dialogue with your study materials. The chatbot uses the full context of your uploaded document to answer complex questions, summarize sections, and clarify difficult concepts.
+### 1. RAG-Powered Chatbot
+Engage in a context-aware dialogue with your study materials. The chatbot retrieves the most relevant chunks from your document to answer complex questions, summarize sections, and clarify difficult concepts—complete with **verified source citations** (filename and page numbers).
 
 ### 2. Smart Flashcards
-Instantly generate high-quality flashcards. The AI identifies key terms and definitions within your notes, creating a structured review system to accelerate memorization.
+Instantly generate high-quality flashcards. The AI uses semantic sampling across different sections of your notes (beginning, middle, and end) to identify key terms and definitions, creating a well-structured review system to accelerate memorization.
 
 ### 3. Quiz Master
-Generate dynamically structured practice exams. Customize your knowledge assessment with multiple difficulty levels and support for both Multiple Choice and True/False formats, complete with instant scoring and explanations.
+Generate dynamically structured practice exams. Customize your knowledge assessment with multiple difficulty levels and support for both Multiple Choice and True/False formats, drawing questions semantically distributed across the entire document.
 
 ### 4. Professional Design
 A minimalist, high-performance interface designed for focus. Features include:
@@ -32,7 +32,10 @@ A minimalist, high-performance interface designed for focus. Features include:
 ## Technical Architecture
 
 - **Frontend**: [Streamlit](https://streamlit.io/)
-- **Large Language Model**: [Llama-3 via Groq API](https://groq.com/)
+- **Large Language Model**: [Llama-3 (llama-3.3-70b-versatile) via Groq API](https://groq.com/)
+- **Vector Database**: [ChromaDB](https://www.trychroma.com/) for local embedding storage and metadata querying
+- **Embeddings**: `all-MiniLM-L6-v2` via [SentenceTransformers](https://sbert.net/)
+- **Text Splitting**: [LangChain Text Splitters](https://github.com/langchain-ai/langchain) for recursive character chunking
 - **PDF Processing**: [PyPDF2](https://pypdf2.readthedocs.io/)
 - **Data Handling**: [Pandas](https://pandas.pydata.org/)
 
