@@ -5,3 +5,4 @@ pandas
 chromadb
 sentence-transformers
 langchain
+langchain-text-splitters
